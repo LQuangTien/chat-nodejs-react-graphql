@@ -1,19 +1,57 @@
-const { UserInputError } = require('apollo-server');
+const { UserInputError, AuthenticationError } = require('apollo-server');
 const bcrypt = require('bcryptjs');
 const { User } = require('../models');
+const { JWT_SECRET } = require('../config/env.json');
+const jwt = require('jsonwebtoken');
+const { Op } = require('sequelize');
 module.exports = {
   Query: {
-    getUsers: async () => {
+    getUsers: async (_, __, context) => {
       try {
-        const users = await User.findAll();
+        if (!context.req && !context.req.headers.authorization) {
+          throw new AuthenticationError('Unanthenticated');
+        }
+        const token = context.req.headers.authorization.split('Bearer ')[1];
+        const decodedToken = jwt.verify(token, JWT_SECRET);
+        const users = await User.findAll({
+          where: { username: { [Op.ne]: decodedToken.username } }
+        });
         return users;
       } catch (error) {
         console.log(error);
+        throw error;
+      }
+    },
+    login: async (_, args) => {
+      const { username, password } = args;
+      const errors = {};
+      try {
+        const user = await User.findOne({ where: { username } });
+        if (!user) {
+          errors.username = 'User not found';
+          throw new UserInputError('User not found', { errors });
+        }
+        const isCorrectPassword = await bcrypt.compare(password, user.password);
+        if (!isCorrectPassword) {
+          errors.password = 'Password is incorrect';
+          throw new AuthenticationError('Password is incorrect', { errors });
+        }
+        const token = jwt.sign({ username }, JWT_SECRET, {
+          expiresIn: 60 * 60
+        });
+        return {
+          ...user.toJSON(),
+          createdAt: user.createdAt.toISOString(),
+          token
+        };
+      } catch (error) {
+        console.log(error);
+        throw error;
       }
     }
   },
   Mutation: {
-    register: async (a, args) => {
+    register: async (_, args) => {
       const { username, email, password, confirmPassword } = args;
       let errors = {};
       try {
@@ -26,10 +64,6 @@ module.exports = {
           errors.confirmPassword = 'Confirm password not must be empty';
         if (confirmPassword !== password)
           errors.confirmPassword = 'Password not match';
-        // const userByUsername = await User.findOne({ where: { username } });
-        // const userByEmail = await User.findOne({ where: { email } });
-        // if (userByUsername) errors.username = 'Username is taken';
-        // if (userByEmail) errors.email = 'Email is taken';
         if (Object.keys(errors).length > 0) {
           throw errors;
         }
