@@ -34,7 +34,7 @@ module.exports = {
         const isCorrectPassword = await bcrypt.compare(password, user.password);
         if (!isCorrectPassword) {
           errors.password = 'Password is incorrect';
-          throw new AuthenticationError('Password is incorrect', { errors });
+          throw new UserInputError('Password is incorrect', { errors });
         }
         const token = jwt.sign({ username }, JWT_SECRET, {
           expiresIn: 60 * 60
